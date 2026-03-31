@@ -1,5 +1,6 @@
 import os
 import random
+import requests
 import streamlit as st
 from supabase import create_client, Client
 from dotenv import load_dotenv
@@ -9,6 +10,7 @@ load_dotenv()
 
 SUPABASE_URL = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
+YOUTUBE_API_KEY = st.secrets.get("YOUTUBE_API_KEY") or os.getenv("YOUTUBE_API_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     st.error("Missing Supabase Credentials! Please check your .env file or Streamlit Secrets.")
@@ -75,24 +77,69 @@ def get_weekly_progress():
     return len(response.data) if response.data else 0
 
 
-def discover_new_workout():
-    """Picks a DIFFERENT random workout from the library and updates Today."""
-    workouts = get_all_workouts()
-    if not workouts:
+def search_youtube_workout():
+    """Searches YouTube for a random workout video and returns its metadata."""
+    search_terms = [
+        "full body workout", "HIIT workout", "morning workout routine",
+        "strength training", "cardio workout", "abs workout",
+        "leg day workout", "home workout no equipment", "yoga workout",
+        "boxing workout"
+    ]
+    query = random.choice(search_terms)
+
+    params = {
+        "part": "snippet",
+        "q": query,
+        "type": "video",
+        "videoCategoryId": "17",  # Sports category
+        "maxResults": 10,
+        "key": YOUTUBE_API_KEY
+    }
+
+    try:
+        response = requests.get("https://www.googleapis.com/youtube/v3/search", params=params)
+        results = response.json().get("items", [])
+        if not results:
+            return None
+
+        # Pick a random result from the top 10
+        picked = random.choice(results)
+        video_id = picked["id"]["videoId"]
+        title = picked["snippet"]["title"]
+        channel = picked["snippet"]["channelTitle"]
+        url = f"https://www.youtube.com/watch?v={video_id}"
+
+        return {
+            "video_id": video_id,
+            "title": title,
+            "channel": channel,
+            "url": url,
+            "duration_seconds": None
+        }
+    except Exception as e:
+        print(f"YouTube search error: {e}")
         return None
 
+
+def discover_new_workout():
+    """Searches YouTube for a new workout, saves it, and sets it as today's workout."""
     current_id = get_current_video_id()
 
-    # Filter out the currently playing video so we always get something new
-    other_workouts = [w for w in workouts if w['video_id'] != current_id]
-
-    # If only one video exists, just use it
-    if not other_workouts:
-        other_workouts = workouts
-
-    random_workout = random.choice(other_workouts)
-    update_workout_today(random_workout['video_id'])
-    return random_workout['url']
+    # Keep searching until we get a different video
+    for _ in range(5):
+        metadata = search_youtube_workout()
+        if metadata and metadata["video_id"] != current_id:
+            # Save to library and set as today
+            add_workout(
+                video_id=metadata["video_id"],
+                title=metadata["title"],
+                url=metadata["url"],
+                channel=metadata["channel"],
+                duration=metadata["duration_seconds"]
+            )
+            update_workout_today(metadata["video_id"])
+            return metadata
+    return None
 
 
 def add_workout_by_url(url):
@@ -108,7 +155,6 @@ def add_workout_by_url(url):
                 channel=metadata['channel'],
                 duration=metadata['duration_seconds']
             )
-            # Immediately set the new video as today's workout
             update_workout_today(metadata['video_id'])
             return True
     except Exception as e:
