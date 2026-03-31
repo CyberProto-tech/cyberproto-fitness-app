@@ -41,6 +41,7 @@ def get_all_workouts():
 def get_workout_today():
     """Gets the currently active workout linked in workout_today."""
     try:
+        # We fetch the workout details joined with the today ID
         response = supabase.table("workout_today").select("video_id, workouts(*)").eq("id", 1).single().execute()
         return response.data
     except Exception:
@@ -48,7 +49,12 @@ def get_workout_today():
 
 def update_workout_today(video_id):
     """Swaps the 'Today' workout to a new video_id."""
-    return supabase.table("workout_today").update({"video_id": video_id, "updated_at": "now()"}).eq("id", 1).execute()
+    # Using a generated timestamp to ensure the record actually updates
+    now_ts = datetime.now().isoformat()
+    return supabase.table("workout_today").update({
+        "video_id": video_id, 
+        "updated_at": now_ts
+    }).eq("id", 1).execute()
 
 def delete_workout(video_id):
     """Deletes a workout (The SQL CASCADE handles the rest)."""
@@ -64,12 +70,12 @@ def get_weekly_progress():
     response = supabase.table("progress").select("id").gte("completed_at", last_week).execute()
     return len(response.data) if response.data else 0
 
-# --- NEW UPDATES ADDED BELOW ---
+# --- DISCOVERY & UTILITY FUNCTIONS ---
 
 def discover_new_workout():
     """Picks a random workout from the library and updates 'Today'."""
     workouts = get_all_workouts()
-    if not workouts:
+    if not workouts or len(workouts) == 0:
         return None
     
     # Pick a random one from the list
@@ -85,15 +91,18 @@ def add_workout_by_url(url):
     Helper for the sidebar to add a workout using just a link.
     This connects the database to your yt_extractor logic.
     """
-    import yt_extractor
-    metadata = yt_extractor.get_video_metadata(url)
-    if metadata:
-        add_workout(
-            video_id=metadata['video_id'],
-            title=metadata['title'],
-            url=metadata['url'],
-            channel=metadata['channel'],
-            duration=metadata['duration_seconds']
-        )
-        return True
+    try:
+        import yt_extractor
+        metadata = yt_extractor.get_video_metadata(url)
+        if metadata:
+            add_workout(
+                video_id=metadata['video_id'],
+                title=metadata['title'],
+                url=metadata['url'],
+                channel=metadata['channel'],
+                duration=metadata['duration_seconds']
+            )
+            return True
+    except Exception as e:
+        print(f"Extraction error: {e}")
     return False
