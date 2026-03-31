@@ -18,6 +18,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# --- DATABASE OPERATIONS ---
 
 def add_workout(video_id, title, url, channel=None, duration=None):
     data = {
@@ -76,6 +77,8 @@ def get_weekly_progress():
     response = supabase.table("progress").select("id").gte("completed_at", last_week).execute()
     return len(response.data) if response.data else 0
 
+
+# --- DISCOVERY FUNCTIONS ---
 
 def search_youtube_workout():
     """Searches YouTube for a random workout video and returns its metadata."""
