@@ -17,6 +17,7 @@ today_data = db.get_workout_today()
 st.sidebar.header("Add Custom URL")
 yt_url = st.sidebar.text_input("YouTube Link:")
 if st.sidebar.button("Add to Library"):
+    # Note: Using your existing function add_workout_by_url
     if yt_url and db.add_workout_by_url(yt_url):
         st.rerun()
 
@@ -25,13 +26,15 @@ col1, col2 = st.columns([2, 1])
 
 with col1:
     st.subheader("🔥 Active Workout")
-    if today_data and len(today_data) > 0 and today_data[0].get('workouts'):
-        workout = today_data[0]['workouts']
-        st.video(workout['url'])
-        st.info(f"Currently Playing: **{workout['title']}**")
+    
+    # FIX: We check if today_data is a dictionary and has 'workouts'
+    if today_data and isinstance(today_data, dict) and 'workouts' in today_data:
+        workout = today_data['workouts']
+        st.video(workout.get('url'))
+        st.info(f"Currently Playing: **{workout.get('title')}**")
         
         if st.button("✅ Mark as Completed"):
-            db.log_completed_workout(workout['video_id'])
+            db.log_completed_workout(workout.get('video_id'))
             st.balloons()
             st.success("Workout logged! Great job.")
     else:
@@ -43,24 +46,26 @@ with col2:
         with st.spinner("Scouring YouTube for pro trainers..."):
             new_url = db.discover_new_workout()
             if new_url:
-                # Refresh data to get the new selection
-                fresh_today = db.get_workout_today()[0]['workouts']
-                email_service.send_workout_email(fresh_today['title'], fresh_today['url'])
-                st.rerun()
+                # Re-fetch data to get the new selection
+                fresh_today = db.get_workout_today()
+                if fresh_today and 'workouts' in fresh_today:
+                    workout_info = fresh_today['workouts']
+                    email_service.send_workout_email(workout_info.get('title'), workout_info.get('url'))
+                    st.rerun()
 
     st.markdown("---")
     st.subheader("📈 Weekly Consistency")
     total_done = db.get_weekly_progress()
     st.metric("Workouts Completed", f"{total_done} this week")
-    # A simple progress bar for a 5-day workout goal
     progress_val = min(total_done / 5, 1.0)
     st.progress(progress_val)
 
     st.markdown("---")
     st.subheader("Your Library")
-    for w in all_workouts[:5]: # Show last 5
-        c = st.columns([4, 1])
-        c[0].write(f"• {w['title'][:25]}...")
-        if c[1].button("🗑️", key=w['video_id']):
-            db.delete_workout(w['video_id'])
-            st.rerun()
+    if all_workouts:
+        for w in all_workouts[:5]: # Show last 5
+            c = st.columns([4, 1])
+            c[0].write(f"• {w.get('title', 'Workout')[:25]}...")
+            if c[1].button("🗑️", key=w.get('video_id')):
+                db.delete_workout(w.get('video_id'))
+                st.rerun()
