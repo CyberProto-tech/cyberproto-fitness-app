@@ -5,24 +5,19 @@ from supabase import create_client, Client
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 
-# 1. SETUP: Load keys from .env (Local) or st.secrets (Cloud)
 load_dotenv()
 
-# This logic checks BOTH places automatically
 SUPABASE_URL = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
 
-# Stop the app if keys are missing to prevent a crash
 if not SUPABASE_URL or not SUPABASE_KEY:
     st.error("Missing Supabase Credentials! Please check your .env file or Streamlit Secrets.")
     st.stop()
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- DATABASE OPERATIONS ---
 
 def add_workout(video_id, title, url, channel=None, duration=None):
-    """Adds a workout to the main library."""
     data = {
         "video_id": video_id,
         "title": title,
@@ -32,65 +27,76 @@ def add_workout(video_id, title, url, channel=None, duration=None):
     }
     return supabase.table("workouts").upsert(data).execute()
 
+
 def get_all_workouts():
-    """Fetches all workouts in the library."""
     response = supabase.table("workouts").select("*").order("created_at", desc=True).execute()
-    # Safely handle the response data
     return response.data if hasattr(response, 'data') else []
+
 
 def get_workout_today():
     """Gets the currently active workout linked in workout_today."""
     try:
-        # We fetch the workout details joined with the today ID
         response = supabase.table("workout_today").select("video_id, workouts(*)").eq("id", 1).single().execute()
         return response.data
     except Exception:
         return None
 
+
+def get_current_video_id():
+    """Returns just the current video_id from workout_today."""
+    try:
+        response = supabase.table("workout_today").select("video_id").eq("id", 1).single().execute()
+        if response.data:
+            return response.data.get("video_id")
+    except Exception:
+        pass
+    return None
+
+
 def update_workout_today(video_id):
-    """Swaps the 'Today' workout to a new video_id."""
-    # Using a generated timestamp to ensure the record actually updates
     now_ts = datetime.now().isoformat()
     return supabase.table("workout_today").update({
-        "video_id": video_id, 
+        "video_id": video_id,
         "updated_at": now_ts
     }).eq("id", 1).execute()
 
+
 def delete_workout(video_id):
-    """Deletes a workout (The SQL CASCADE handles the rest)."""
     return supabase.table("workouts").delete().eq("video_id", video_id).execute()
 
+
 def log_completed_workout(video_id):
-    """Logs a completion record in the progress table."""
     return supabase.table("progress").insert({"video_id": video_id}).execute()
 
+
 def get_weekly_progress():
-    """Counts how many workouts were completed in the last 7 days."""
     last_week = (datetime.now() - timedelta(days=7)).isoformat()
     response = supabase.table("progress").select("id").gte("completed_at", last_week).execute()
     return len(response.data) if response.data else 0
 
-# --- DISCOVERY & UTILITY FUNCTIONS ---
 
 def discover_new_workout():
-    """Picks a random workout from the library and updates 'Today'."""
+    """Picks a DIFFERENT random workout from the library and updates Today."""
     workouts = get_all_workouts()
-    if not workouts or len(workouts) == 0:
+    if not workouts:
         return None
-    
-    # Pick a random one from the list
-    random_workout = random.choice(workouts)
-    new_id = random_workout['video_id']
-    
-    # Update the 'workout_today' table in Supabase
-    update_workout_today(new_id)
+
+    current_id = get_current_video_id()
+
+    # Filter out the currently playing video so we always get something new
+    other_workouts = [w for w in workouts if w['video_id'] != current_id]
+
+    # If only one video exists, just use it
+    if not other_workouts:
+        other_workouts = workouts
+
+    random_workout = random.choice(other_workouts)
+    update_workout_today(random_workout['video_id'])
     return random_workout['url']
 
+
 def add_workout_by_url(url):
-    """
-    Helper for the sidebar to add a workout using just a link.
-    This connects the database to your yt_extractor logic.
-    """
+    """Adds a workout from a YouTube URL and sets it as today's workout."""
     try:
         import yt_extractor
         metadata = yt_extractor.get_video_metadata(url)
@@ -102,6 +108,8 @@ def add_workout_by_url(url):
                 channel=metadata['channel'],
                 duration=metadata['duration_seconds']
             )
+            # Immediately set the new video as today's workout
+            update_workout_today(metadata['video_id'])
             return True
     except Exception as e:
         print(f"Extraction error: {e}")
